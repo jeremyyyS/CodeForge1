@@ -164,16 +164,15 @@ with header_right:
 st.divider()
 
 # -------------------- MODE SELECTOR --------------------
-mode_col1, mode_col2 = st.columns([3, 1])
-with mode_col1:
-    opt_mode = st.radio(
-        "Optimization Mode",
-        ["AI-Powered (Hybrid)", "Rules-Only (Offline)"],
-        horizontal=True,
-        label_visibility="collapsed"
-    )
-with mode_col2:
-    uploaded_file = st.file_uploader("Upload .py file", type=["py"], label_visibility="collapsed")
+st.markdown("### Select Optimization Mode")
+opt_mode = st.radio(
+    "Optimization Mode",
+    ["AI-Powered (Hybrid)", "Rules-Only (Offline)"],
+    horizontal=True,
+    help="AI-Powered uses Gemini API with automatic fallback. Rules-Only works fully offline."
+)
+st.markdown("")
+uploaded_file = st.file_uploader("Or upload a .py file", type=["py"])
 
 # -------------------- LAYOUT --------------------
 col1, col2 = st.columns(2)
