@@ -1,18 +1,21 @@
 import os
+import logging
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 # API Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 MODEL_NAME = os.getenv("MODEL_NAME", "gemini-2.5-flash")
 
-# Validation
+# Validation - warn instead of crash so offline/rules-only mode still works
 if not GEMINI_API_KEY:
-    raise RuntimeError(
-        "GEMINI_API_KEY not found in environment!\n"
-        "Please create a .env file with your API key.\n"
-        "See .env.example for template."
+    logger.warning(
+        "GEMINI_API_KEY not found in environment. "
+        "Online/Hybrid mode will be unavailable. "
+        "Rules-only (offline) mode will still work."
     )
 
 # API Settings

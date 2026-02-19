@@ -9,7 +9,6 @@ requests>=2.31.0
 
 # Utilities
 python-dotenv>=1.0.0
-hashlib-additional>=1.0.0
 
 # Backend Dependencies (if running locally)
 fastapi>=0.109.0
