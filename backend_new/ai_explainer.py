@@ -1,9 +1,11 @@
 import asyncio
-from google import genai
-from google.genai import types
 from config import GEMINI_API_KEY, MODEL_NAME, API_TIMEOUT
 
-client = genai.Client(api_key=GEMINI_API_KEY)
+client = None
+if GEMINI_API_KEY:
+    from google import genai
+    from google.genai import types
+    client = genai.Client(api_key=GEMINI_API_KEY)
 
 
 async def generate_ai_explanation(
@@ -60,6 +62,11 @@ Avoid fluff. Be confident and analytical.
 """
 
     try:
+        if not client:
+            raise Exception("Gemini API not configured")
+
+        from google.genai import types
+
         response = await asyncio.wait_for(
             asyncio.to_thread(
                 lambda: client.models.generate_content(

@@ -40,8 +40,14 @@ def robust_benchmark(code: str, runs: int = None, iterations: int = None):
     if not samples:
         return None
 
+    mean_ms = statistics.mean(samples)
+    variance_pct = 0.0
+    if len(samples) > 1 and mean_ms > 0:
+        variance_pct = round((statistics.stdev(samples) / mean_ms) * 100, 2)
+
     return {
-        "runtime_ms": round(statistics.mean(samples), 3),
+        "runtime_ms": round(mean_ms, 3),
         "memory_mb": round(max(mem_samples), 2),
-        "runs": len(samples)
+        "runs": len(samples),
+        "variance_pct": variance_pct
     }

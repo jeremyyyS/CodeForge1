@@ -1,8 +1,9 @@
 # utils/api.py
 
+import os
 import requests
 
-BASE_URL = "http://127.0.0.1:8000"
+BASE_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
 
 
 class APIClient:
@@ -19,8 +20,7 @@ class APIClient:
 
         except requests.exceptions.RequestException as e:
             return {
-                "status": "ERROR",
-                "message": str(e)
+                "error": f"Backend unavailable: {str(e)}"
             }
 
     def optimize_rules_only(self, code: str):
@@ -35,8 +35,7 @@ class APIClient:
 
         except requests.exceptions.RequestException as e:
             return {
-                "status": "ERROR",
-                "message": str(e)
+                "error": f"Backend unavailable: {str(e)}"
             }
 
     def upload_file(self, file_bytes, filename: str):
@@ -55,8 +54,7 @@ class APIClient:
 
         except requests.exceptions.RequestException as e:
             return {
-                "status": "ERROR",
-                "message": str(e)
+                "error": f"Backend unavailable: {str(e)}"
             }
 
 

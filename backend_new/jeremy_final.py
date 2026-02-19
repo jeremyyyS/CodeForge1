@@ -2,6 +2,7 @@
 from ai_explainer import generate_ai_explanation
 from semantic_search import SemanticPatternDetector
 from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import ast
 from datetime import datetime
@@ -10,11 +11,23 @@ from rules_engine import RuleBasedOptimizer
 from rule_transformer import apply_rule_based_optimizations
 from llm_optimizer import optimize_with_gemini
 from utils import robust_benchmark
+from safety import SafetyGuard
+from metrics import calculate_confidence, generate_explainability
 
-app = FastAPI()
+app = FastAPI(title="CodeForge API", version="2.0")
+
+# CORS middleware for cross-origin requests
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 rule_optimizer = RuleBasedOptimizer()
 semantic_detector = SemanticPatternDetector()
+safety_guard = SafetyGuard()
 
 
 class CodeRequest(BaseModel):
@@ -61,6 +74,30 @@ async def optimize_rules_only(req: CodeRequest):
 
     speedup = compute_speedup(original_bench, optimized_bench)
 
+    variance_pct = original_bench.get("variance_pct", 0.0) if original_bench else 0.0
+    mem_before = original_bench.get("memory_mb", 0.0) if original_bench else 0.0
+    mem_after = optimized_bench.get("memory_mb", 0.0) if optimized_bench else 0.0
+
+    # Safety analysis
+    safety_analysis = safety_guard.validate(
+        req.code,
+        optimized,
+        speedup or 1.0,
+        mem_before,
+        mem_after
+    )
+
+    # Confidence scoring
+    confidence = calculate_confidence(rules, speedup or 1.0, variance_pct)
+
+    # Explainability
+    explainability = generate_explainability(
+        req.code,
+        optimized,
+        speedup or 1.0,
+        rules
+    )
+
     ai_explanation = await generate_ai_explanation(
         req.code,
         optimized,
@@ -70,6 +107,7 @@ async def optimize_rules_only(req: CodeRequest):
 
     return {
         "mode": "RULES_ONLY",
+        "status": "success",
         "original_code": req.code,
         "optimized_code": optimized,
         "rules_detected": rules,
@@ -79,6 +117,9 @@ async def optimize_rules_only(req: CodeRequest):
             "optimized": optimized_bench,
             "speedup_factor": round(speedup, 2) if speedup else None
         },
+        "safety_analysis": safety_analysis,
+        "confidence": confidence,
+        "explainability": explainability,
         "ai_explanation": ai_explanation,
         "timestamp": datetime.now().isoformat()
     }
@@ -100,8 +141,10 @@ async def optimize_rules_only_simple(req: CodeRequest):
 
     return {
         "mode": "RULES_SIMPLE",
+        "status": "success",
         "original_code": req.code,
         "optimized_code": optimized,
+        "rules_detected": rules,
         "timestamp": datetime.now().isoformat()
     }
 
@@ -148,8 +191,6 @@ async def optimize_hybrid(req: CodeRequest):
     mem_after = optimized_bench.get("memory_mb", 0.0) if optimized_bench else 0.0
 
     # -------- SAFETY --------
-    from safety import SafetyGuard
-    safety_guard = SafetyGuard()
     safety_analysis = safety_guard.validate(
         req.code,
         optimized,
@@ -159,7 +200,6 @@ async def optimize_hybrid(req: CodeRequest):
     )
 
     # -------- CONFIDENCE --------
-    from metrics import calculate_confidence, generate_explainability
     confidence = calculate_confidence(rules, speedup or 1.0, variance_pct)
 
     explainability = generate_explainability(
@@ -215,10 +255,12 @@ async def upload_code(file: UploadFile = File(...)):
 # --------------------------------------------------------
 @app.get("/")
 async def root():
+    from config import GEMINI_API_KEY
     return {
-        "message": "SafeOpt Code Optimizer",
+        "message": "CodeForge Code Optimizer",
         "status": "running",
-        "version": "2.0"
+        "version": "2.0",
+        "gemini_available": bool(GEMINI_API_KEY)
     }
 
 
