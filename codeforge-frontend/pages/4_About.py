@@ -1,4 +1,5 @@
 import streamlit as st
+import html as html_module
 from utils.auth import require_auth, get_current_user
 
 st.set_page_config(page_title="About", layout="wide")
@@ -59,7 +60,7 @@ hr {
 
 st.markdown("## About CodeForge")
 st.markdown(
-    f"<div style='color:#9CA3AF;font-size:14px;'>Signed in as {user['username']}</div>",
+    f"<div style='color:#9CA3AF;font-size:14px;'>Signed in as {html_module.escape(user['username'])}</div>",
     unsafe_allow_html=True
 )
 st.markdown("<hr>", unsafe_allow_html=True)

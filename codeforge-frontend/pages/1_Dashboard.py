@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import time
+import html as html_module
 
 from utils.auth import require_auth, get_current_user
 from utils import api
@@ -189,7 +189,7 @@ if result and not result.get("error"):
     output_placeholder.code(optimized_code, language="python")
 
     if result.get("ai_explanation"):
-        explanation = result["ai_explanation"]
+        explanation = html_module.escape(str(result["ai_explanation"]))
         st.markdown(f"""
         <div class="ai-panel">
             <h3>AI Analysis</h3>

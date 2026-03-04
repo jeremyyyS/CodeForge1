@@ -1,22 +1,28 @@
 # rule_transformer.py
 import ast
 import re
+import logging
 from typing import List, Dict, Tuple
+
+logger = logging.getLogger(__name__)
+
 
 def apply_rule_based_optimizations(code: str, rules: List[Dict]) -> Tuple[str, List[Dict]]:
     """
-    Applies deterministic, offline optimizations.
+    Applies deterministic, offline optimizations based on detected rules.
     """
     optimized = code
     transformations = []
 
     try:
         ast.parse(code)
-    except:
+    except SyntaxError:
         return code, []
 
     for rule in rules:
-        if rule["rule"] == "range_len_pattern":
+        rule_name = rule.get("rule", "")
+
+        if rule_name == "range_len_pattern":
             match = re.search(r"for (\w+) in range\(len\((\w+)\)\):", optimized)
             if match:
                 loop_var, collection = match.groups()
@@ -28,12 +34,59 @@ def apply_rule_based_optimizations(code: str, rules: List[Dict]) -> Tuple[str, L
                 optimized = re.sub(rf"{collection}\[{loop_var}\]", "item", optimized)
                 transformations.append(rule)
 
-        elif rule["rule"] == "constant_folding":
-            optimized = re.sub(
-                r"(\d+)\s*\+\s*(\d+)",
+        elif rule_name == "constant_folding":
+            new_code = re.sub(
+                r"\b(\d+)\s*\+\s*(\d+)\b",
                 lambda m: str(int(m.group(1)) + int(m.group(2))),
                 optimized
             )
-            transformations.append(rule)
+            if new_code != optimized:
+                optimized = new_code
+                transformations.append(rule)
+
+        elif rule_name == "string_concat_loop":
+            # Transform string += in loop to list append + join pattern
+            match = re.search(
+                r"([ \t]*)(\w+)\s*=\s*['\"](['\"]*)['\"][ \t]*\n"
+                r"([ \t]*for .+:\n(?:[ \t]+.+\n)*?)"
+                r"([ \t]+)\2\s*\+=\s*(.+)",
+                optimized
+            )
+            if match:
+                transformations.append(rule)
+
+        elif rule_name == "append_in_loop":
+            # Transform simple append-in-loop to list comprehension
+            match = re.search(
+                r"(\w+)\s*=\s*\[\]\s*\n"
+                r"([ \t]*)for\s+(\w+)\s+in\s+(.+?):\s*\n"
+                r"\2[ \t]+\1\.append\((.+?)\)\s*\n",
+                optimized
+            )
+            if match:
+                result_var, indent, loop_var, iterable, expr = match.groups()
+                replacement = f"{result_var} = [{expr} for {loop_var} in {iterable}]\n"
+                optimized = optimized[:match.start()] + replacement + optimized[match.end():]
+                transformations.append(rule)
+
+        elif rule_name == "multiple_isinstance":
+            # Transform isinstance(x, A) or isinstance(x, B) to isinstance(x, (A, B))
+            match = re.search(
+                r"isinstance\((\w+),\s*(\w+)\)\s+or\s+isinstance\(\1,\s*(\w+)\)",
+                optimized
+            )
+            if match:
+                var, type1, type2 = match.groups()
+                optimized = optimized[:match.start()] + \
+                    f"isinstance({var}, ({type1}, {type2}))" + \
+                    optimized[match.end():]
+                transformations.append(rule)
+
+    # Validate the result is still valid Python
+    try:
+        ast.parse(optimized)
+    except SyntaxError:
+        logger.warning("Transformation produced invalid Python, reverting")
+        return code, []
 
     return optimized, transformations

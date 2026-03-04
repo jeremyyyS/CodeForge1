@@ -49,14 +49,14 @@ case $choice in
         echo "🚀 Starting Streamlit frontend..."
         echo "📍 Opening browser at http://localhost:8501"
         echo ""
-        streamlit run Home.py
+        streamlit run Login.py
         ;;
     2)
         echo ""
         echo "🚀 Starting FastAPI backend..."
         echo "📍 API will be available at http://localhost:8000"
         echo ""
-        cd ../backend 2>/dev/null || cd ../
+        cd ../backend_new 2>/dev/null || cd ../backend_new
         python3 jeremy_final.py
         ;;
     3)
@@ -66,8 +66,8 @@ case $choice in
         echo "📍 Backend: http://localhost:8000"
         echo ""
         echo "⚠️  Note: This requires two separate terminals."
-        echo "   Terminal 1: python3 jeremy_final.py (backend)"
-        echo "   Terminal 2: streamlit run Home.py (frontend)"
+        echo "   Terminal 1: cd backend_new && python3 jeremy_final.py"
+        echo "   Terminal 2: cd codeforge-frontend && streamlit run Login.py"
         echo ""
         echo "Please open two terminals and run the commands above."
         ;;
