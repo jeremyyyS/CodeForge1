@@ -1,8 +1,9 @@
 # utils/api.py
 
+import os
 import requests
 
-BASE_URL = "http://127.0.0.1:8000"
+BASE_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
 
 
 class APIClient:
@@ -17,9 +18,22 @@ class APIClient:
             response.raise_for_status()
             return response.json()
 
+        except requests.exceptions.ConnectionError:
+            return {
+                "status": "ERROR",
+                "error": "Cannot connect to backend. Make sure the backend server is running.",
+                "message": "Backend unavailable"
+            }
+        except requests.exceptions.Timeout:
+            return {
+                "status": "ERROR",
+                "error": "Request timed out. The code may be too complex to optimize.",
+                "message": "Request timeout"
+            }
         except requests.exceptions.RequestException as e:
             return {
                 "status": "ERROR",
+                "error": str(e),
                 "message": str(e)
             }
 
@@ -33,9 +47,22 @@ class APIClient:
             response.raise_for_status()
             return response.json()
 
+        except requests.exceptions.ConnectionError:
+            return {
+                "status": "ERROR",
+                "error": "Cannot connect to backend. Make sure the backend server is running.",
+                "message": "Backend unavailable"
+            }
+        except requests.exceptions.Timeout:
+            return {
+                "status": "ERROR",
+                "error": "Request timed out. The code may be too complex to benchmark.",
+                "message": "Request timeout"
+            }
         except requests.exceptions.RequestException as e:
             return {
                 "status": "ERROR",
+                "error": str(e),
                 "message": str(e)
             }
 
@@ -53,9 +80,16 @@ class APIClient:
             response.raise_for_status()
             return response.json()
 
+        except requests.exceptions.ConnectionError:
+            return {
+                "status": "ERROR",
+                "error": "Cannot connect to backend. Make sure the backend server is running.",
+                "message": "Backend unavailable"
+            }
         except requests.exceptions.RequestException as e:
             return {
                 "status": "ERROR",
+                "error": str(e),
                 "message": str(e)
             }
 

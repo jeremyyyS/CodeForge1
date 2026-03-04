@@ -55,7 +55,7 @@ class SafetyGuard:
                     "message": f"Code complexity increased {(opt_complexity/orig_complexity-1)*100:.0f}% for only {(speedup-1)*100:.1f}% speedup",
                     "recommendation": "WARN - prioritize readability over micro-optimizations"
                 })
-        except:
+        except SyntaxError:
             pass
         
         return {

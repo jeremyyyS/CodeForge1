@@ -1,7 +1,12 @@
 ## run this file first always
+import logging
+import time
+from collections import defaultdict
 from ai_explainer import generate_ai_explanation
 from semantic_search import SemanticPatternDetector
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 import ast
 from datetime import datetime
@@ -10,15 +15,84 @@ from rules_engine import RuleBasedOptimizer
 from rule_transformer import apply_rule_based_optimizations
 from llm_optimizer import optimize_with_gemini
 from utils import robust_benchmark
+from safety import SafetyGuard
+from metrics import calculate_confidence, generate_explainability
 
-app = FastAPI()
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger("codeforge")
+
+app = FastAPI(
+    title="CodeForge API",
+    description="AI-powered Python code optimization platform",
+    version="2.1",
+)
+
+# CORS middleware - restrict origins for security
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:8501",
+        "http://127.0.0.1:8501",
+    ],
+    allow_credentials=True,
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
+
+# Rate limiting state
+_rate_limit_store: dict = defaultdict(list)
+RATE_LIMIT_WINDOW = 60  # seconds
+RATE_LIMIT_MAX_REQUESTS = 30  # max requests per window per IP
+
+# File upload limits
+MAX_UPLOAD_SIZE = 100 * 1024  # 100 KB
 
 rule_optimizer = RuleBasedOptimizer()
 semantic_detector = SemanticPatternDetector()
+safety_guard = SafetyGuard()
 
 
 class CodeRequest(BaseModel):
     code: str = Field(..., min_length=1, max_length=10000)
+
+
+# --------------------------------------------------------
+# RATE LIMITING MIDDLEWARE
+# --------------------------------------------------------
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    client_ip = request.client.host if request.client else "unknown"
+    now = time.time()
+
+    # Clean old entries
+    _rate_limit_store[client_ip] = [
+        t for t in _rate_limit_store[client_ip]
+        if now - t < RATE_LIMIT_WINDOW
+    ]
+
+    if len(_rate_limit_store[client_ip]) >= RATE_LIMIT_MAX_REQUESTS:
+        logger.warning("Rate limit exceeded for %s", client_ip)
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "Too many requests. Please try again later."}
+        )
+
+    _rate_limit_store[client_ip].append(now)
+
+    # Log request
+    logger.info("%s %s from %s", request.method, request.url.path, client_ip)
+    start_time = time.time()
+    response = await call_next(request)
+    duration = round(time.time() - start_time, 3)
+    logger.info("%s %s completed in %ss (status %d)",
+                request.method, request.url.path, duration, response.status_code)
+
+    return response
+
 
 # --------------------------------------------------------
 # SAFE BENCHMARK WRAPPER
@@ -26,7 +100,8 @@ class CodeRequest(BaseModel):
 def safe_benchmark(code: str):
     try:
         return robust_benchmark(code, runs=3)
-    except Exception:
+    except Exception as e:
+        logger.error("Benchmark failed: %s", e)
         return None
 
 
@@ -70,6 +145,7 @@ async def optimize_rules_only(req: CodeRequest):
 
     return {
         "mode": "RULES_ONLY",
+        "status": "success",
         "original_code": req.code,
         "optimized_code": optimized,
         "rules_detected": rules,
@@ -100,8 +176,10 @@ async def optimize_rules_only_simple(req: CodeRequest):
 
     return {
         "mode": "RULES_SIMPLE",
+        "status": "success",
         "original_code": req.code,
         "optimized_code": optimized,
+        "rules_detected": rules,
         "timestamp": datetime.now().isoformat()
     }
 
@@ -126,8 +204,8 @@ async def optimize_hybrid(req: CodeRequest):
     try:
         optimized = await optimize_with_gemini(req.code, hints=rules)
         mode = "HYBRID"
-    except Exception:
-        # FALLBACK TO RULES
+    except Exception as e:
+        logger.warning("LLM optimization failed, falling back to rules: %s", e)
         optimized, _ = apply_rule_based_optimizations(req.code, rules)
         mode = "RULES_FALLBACK"
 
@@ -148,8 +226,6 @@ async def optimize_hybrid(req: CodeRequest):
     mem_after = optimized_bench.get("memory_mb", 0.0) if optimized_bench else 0.0
 
     # -------- SAFETY --------
-    from safety import SafetyGuard
-    safety_guard = SafetyGuard()
     safety_analysis = safety_guard.validate(
         req.code,
         optimized,
@@ -159,7 +235,6 @@ async def optimize_hybrid(req: CodeRequest):
     )
 
     # -------- CONFIDENCE --------
-    from metrics import calculate_confidence, generate_explainability
     confidence = calculate_confidence(rules, speedup or 1.0, variance_pct)
 
     explainability = generate_explainability(
@@ -202,10 +277,27 @@ async def optimize_hybrid(req: CodeRequest):
 @app.post("/upload")
 async def upload_code(file: UploadFile = File(...)):
 
-    if not file.filename.endswith(".py"):
+    if not file.filename or not file.filename.endswith(".py"):
         raise HTTPException(400, detail="Only .py files allowed")
 
-    code = (await file.read()).decode("utf-8")
+    # Read with size limit
+    content = await file.read()
+    if len(content) > MAX_UPLOAD_SIZE:
+        raise HTTPException(
+            413,
+            detail=f"File too large. Maximum size is {MAX_UPLOAD_SIZE // 1024} KB"
+        )
+
+    try:
+        code = content.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(400, detail="File must be valid UTF-8 encoded text")
+
+    # Validate it's parseable Python
+    try:
+        ast.parse(code)
+    except SyntaxError as e:
+        raise HTTPException(400, detail=f"File contains invalid Python syntax: {e}")
 
     return await optimize_hybrid(CodeRequest(code=code))
 
@@ -216,9 +308,9 @@ async def upload_code(file: UploadFile = File(...)):
 @app.get("/")
 async def root():
     return {
-        "message": "SafeOpt Code Optimizer",
+        "message": "CodeForge Code Optimizer",
         "status": "running",
-        "version": "2.0"
+        "version": "2.1"
     }
 
 
