@@ -1,5 +1,4 @@
 # utils.py
-import ast
 import timeit
 import tracemalloc
 import statistics
@@ -117,6 +116,11 @@ def _timeout_handler(signum, frame):
 
 
 def robust_benchmark(code: str, runs: int = None, iterations: int = None):
+    """
+    Benchmark code execution time and memory usage.
+    Uses a shared namespace dict so variables persist across lines within exec(),
+    fixing the Python 3 list-comprehension scope issue.
+    """
     if runs is None:
         runs = BENCHMARK_RUNS
     if iterations is None:

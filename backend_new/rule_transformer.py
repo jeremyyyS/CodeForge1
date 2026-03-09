@@ -89,4 +89,72 @@ def apply_rule_based_optimizations(code: str, rules: List[Dict]) -> Tuple[str, L
         logger.warning("Transformation produced invalid Python, reverting")
         return code, []
 
+        elif rule_name == "append_in_loop":
+            # Transform: var = []; for x in iterable: var.append(expr)
+            # Into: var = [expr for x in iterable]
+            pattern = re.compile(
+                r"(\w+)\s*=\s*\[\]\s*\n"
+                r"(\s*)for\s+(\w+)\s+in\s+(.+?):\s*\n"
+                r"\s+\1\.append\((.+?)\)\s*$",
+                re.MULTILINE
+            )
+            match = pattern.search(optimized)
+            if match:
+                var, indent, loop_var, iterable, expr = match.groups()
+                replacement = f"{var} = [{expr} for {loop_var} in {iterable}]"
+                optimized = pattern.sub(replacement, optimized, count=1)
+                transformations.append(rule)
+
+        elif rule_name == "string_concat_loop":
+            # Transform: var = ""; for x in it: var += expr -> var = ''.join(...)
+            pattern = re.compile(
+                r"(\w+)\s*=\s*[\"\']{2}\s*\n"
+                r"(\s*)for\s+(\w+)\s+in\s+(.+?):\s*\n"
+                r"\s+\1\s*\+=\s*(.+?)\s*$",
+                re.MULTILINE
+            )
+            match = pattern.search(optimized)
+            if match:
+                var, indent, loop_var, iterable, expr = match.groups()
+                replacement = f"{var} = ''.join({expr} for {loop_var} in {iterable})"
+                optimized = pattern.sub(replacement, optimized, count=1)
+                transformations.append(rule)
+
+        elif rule_name == "multiple_isinstance":
+            # isinstance(x, A) or isinstance(x, B) -> isinstance(x, (A, B))
+            pattern = re.compile(
+                r"isinstance\((\w+),\s*(\w+)\)\s+or\s+isinstance\(\1,\s*(\w+)\)"
+            )
+            match = pattern.search(optimized)
+            if match:
+                obj, type1, type2 = match.groups()
+                optimized = pattern.sub(
+                    f"isinstance({obj}, ({type1}, {type2}))",
+                    optimized, count=1
+                )
+                transformations.append(rule)
+
+        elif rule_name == "loop_invariant_motion":
+            # Already handled by range_len_pattern in most cases - skip if already transformed
+            if "enumerate" not in optimized:
+                pattern = re.compile(
+                    r"^(\s*)for\s+(\w+)\s+in\s+range\(len\((\w+)\)\):",
+                    re.MULTILINE
+                )
+                match = pattern.search(optimized)
+                if match:
+                    indent, loop_var, collection = match.groups()
+                    length_var = f"_{collection}_len"
+                    optimized = pattern.sub(
+                        f"{indent}{length_var} = len({collection})\n{indent}for {loop_var} in range({length_var}):",
+                        optimized, count=1
+                    )
+                    transformations.append(rule)
+
+    # Verify the optimized code is still valid Python
+    try:
+        ast.parse(optimized)
+    except SyntaxError:
+        return code, []
+
     return optimized, transformations
