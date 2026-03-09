@@ -17,6 +17,7 @@ from llm_optimizer import optimize_with_gemini
 from utils import robust_benchmark
 from safety import SafetyGuard
 from metrics import calculate_confidence, generate_explainability
+from complexity import analyze_complexity
 
 # Configure logging
 logging.basicConfig(
@@ -184,21 +185,7 @@ async def optimize_rules_only(req: CodeRequest):
     )
     result["ai_explanation"] = ai_explanation
 
-    return {
-        "mode": "RULES_ONLY",
-        "status": "success",
-        "original_code": req.code,
-        "optimized_code": optimized,
-        "rules_detected": rules,
-        "transformations": transformations,
-        "benchmarks": {
-            "original": original_bench,
-            "optimized": optimized_bench,
-            "speedup_factor": round(speedup, 2) if speedup else None
-        },
-        "ai_explanation": ai_explanation,
-        "timestamp": datetime.now().isoformat()
-    }
+    return result
 
 
 # --------------------------------------------------------
@@ -256,34 +243,9 @@ async def optimize_hybrid(req: CodeRequest):
     except SyntaxError:
         optimized = req.code
 
-    # -------- BENCHMARK SAFELY --------
-    original_bench = safe_benchmark(req.code)
-    optimized_bench = safe_benchmark(optimized)
-
-    speedup = compute_speedup(original_bench, optimized_bench)
-
-    variance_pct = original_bench.get("variance_pct", 0.0) if original_bench else 0.0
-    mem_before = original_bench.get("memory_mb", 0.0) if original_bench else 0.0
-    mem_after = optimized_bench.get("memory_mb", 0.0) if optimized_bench else 0.0
-
-    # -------- SAFETY --------
-    safety_analysis = safety_guard.validate(
-        req.code,
-        optimized,
-        speedup or 1.0,
-        mem_before,
-        mem_after
-    )
-
-    # -------- CONFIDENCE --------
-    confidence = calculate_confidence(rules, speedup or 1.0, variance_pct)
-
-    explainability = generate_explainability(
-        req.code,
-        optimized,
-        speedup or 1.0,
-        rules
-    )
+    # -------- BUILD RESPONSE --------
+    _, transformations = apply_rule_based_optimizations(req.code, rules)
+    result = _build_response(mode, req.code, optimized, rules, transformations)
 
     # -------- AI EXPLANATION --------
     ai_explanation = await generate_ai_explanation(

@@ -44,51 +44,6 @@ def apply_rule_based_optimizations(code: str, rules: List[Dict]) -> Tuple[str, L
                 optimized = new_code
                 transformations.append(rule)
 
-        elif rule_name == "string_concat_loop":
-            # Transform string += in loop to list append + join pattern
-            match = re.search(
-                r"([ \t]*)(\w+)\s*=\s*['\"](['\"]*)['\"][ \t]*\n"
-                r"([ \t]*for .+:\n(?:[ \t]+.+\n)*?)"
-                r"([ \t]+)\2\s*\+=\s*(.+)",
-                optimized
-            )
-            if match:
-                transformations.append(rule)
-
-        elif rule_name == "append_in_loop":
-            # Transform simple append-in-loop to list comprehension
-            match = re.search(
-                r"(\w+)\s*=\s*\[\]\s*\n"
-                r"([ \t]*)for\s+(\w+)\s+in\s+(.+?):\s*\n"
-                r"\2[ \t]+\1\.append\((.+?)\)\s*\n",
-                optimized
-            )
-            if match:
-                result_var, indent, loop_var, iterable, expr = match.groups()
-                replacement = f"{result_var} = [{expr} for {loop_var} in {iterable}]\n"
-                optimized = optimized[:match.start()] + replacement + optimized[match.end():]
-                transformations.append(rule)
-
-        elif rule_name == "multiple_isinstance":
-            # Transform isinstance(x, A) or isinstance(x, B) to isinstance(x, (A, B))
-            match = re.search(
-                r"isinstance\((\w+),\s*(\w+)\)\s+or\s+isinstance\(\1,\s*(\w+)\)",
-                optimized
-            )
-            if match:
-                var, type1, type2 = match.groups()
-                optimized = optimized[:match.start()] + \
-                    f"isinstance({var}, ({type1}, {type2}))" + \
-                    optimized[match.end():]
-                transformations.append(rule)
-
-    # Validate the result is still valid Python
-    try:
-        ast.parse(optimized)
-    except SyntaxError:
-        logger.warning("Transformation produced invalid Python, reverting")
-        return code, []
-
         elif rule_name == "append_in_loop":
             # Transform: var = []; for x in iterable: var.append(expr)
             # Into: var = [expr for x in iterable]
@@ -135,7 +90,6 @@ def apply_rule_based_optimizations(code: str, rules: List[Dict]) -> Tuple[str, L
                 transformations.append(rule)
 
         elif rule_name == "loop_invariant_motion":
-            # Already handled by range_len_pattern in most cases - skip if already transformed
             if "enumerate" not in optimized:
                 pattern = re.compile(
                     r"^(\s*)for\s+(\w+)\s+in\s+range\(len\((\w+)\)\):",
@@ -155,6 +109,7 @@ def apply_rule_based_optimizations(code: str, rules: List[Dict]) -> Tuple[str, L
     try:
         ast.parse(optimized)
     except SyntaxError:
+        logger.warning("Transformation produced invalid Python, reverting")
         return code, []
 
     return optimized, transformations

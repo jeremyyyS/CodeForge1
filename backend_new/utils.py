@@ -1,11 +1,17 @@
 # utils.py
+import ast
 import timeit
 import tracemalloc
 import statistics
 import sys
-import signal
+import platform
 from io import StringIO
 from config import BENCHMARK_RUNS, BENCHMARK_ITERATIONS
+
+# signal.SIGALRM is only available on Unix - use threading timeout on Windows
+_IS_WINDOWS = platform.system() == "Windows"
+if not _IS_WINDOWS:
+    import signal
 
 # Dangerous modules that should not be importable during benchmarking
 BLOCKED_IMPORTS = {
@@ -115,6 +121,43 @@ def _timeout_handler(signum, frame):
     raise BenchmarkTimeout("Benchmark execution timed out")
 
 
+def _run_with_timeout(func, timeout_sec):
+    """Run a function with a timeout, cross-platform."""
+    if _IS_WINDOWS:
+        import threading
+        result = [None]
+        exception = [None]
+
+        def target():
+            try:
+                result[0] = func()
+            except Exception as e:
+                exception[0] = e
+
+        thread = threading.Thread(target=target)
+        thread.daemon = True
+        thread.start()
+        thread.join(timeout=timeout_sec)
+
+        if thread.is_alive():
+            raise BenchmarkTimeout("Benchmark execution timed out")
+        if exception[0]:
+            raise exception[0]
+        return result[0]
+    else:
+        old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
+        signal.alarm(timeout_sec)
+        try:
+            result = func()
+            signal.alarm(0)
+            return result
+        except:
+            signal.alarm(0)
+            raise
+        finally:
+            signal.signal(signal.SIGALRM, old_handler)
+
+
 def robust_benchmark(code: str, runs: int = None, iterations: int = None):
     """
     Benchmark code execution time and memory usage.
@@ -147,17 +190,13 @@ def robust_benchmark(code: str, runs: int = None, iterations: int = None):
             sys.stdout = StringIO()
             tracemalloc.start()
 
-            # Set timeout for execution
-            old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
-            signal.alarm(BENCHMARK_TIMEOUT)
-
-            t = timeit.timeit(
-                lambda: exec(code, safe_globals.copy(), {}),
-                number=iterations
+            t = _run_with_timeout(
+                lambda: timeit.timeit(
+                    lambda: exec(code, safe_globals.copy(), {}),
+                    number=iterations
+                ),
+                BENCHMARK_TIMEOUT
             )
-
-            signal.alarm(0)
-            signal.signal(signal.SIGALRM, old_handler)
 
             current, peak = tracemalloc.get_traced_memory()
             tracemalloc.stop()
@@ -166,7 +205,6 @@ def robust_benchmark(code: str, runs: int = None, iterations: int = None):
             samples.append(t * 1000 / iterations)
             mem_samples.append(peak / (1024 ** 2))
         except BenchmarkTimeout:
-            signal.alarm(0)
             sys.stdout = old_stdout
             if tracemalloc.is_tracing():
                 tracemalloc.stop()
