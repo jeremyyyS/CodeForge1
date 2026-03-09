@@ -78,6 +78,11 @@ Avoid fluff. Be confident and analytical.
 """
 
     try:
+        if not client:
+            raise Exception("Gemini API not configured")
+
+        from google.genai import types
+
         response = await asyncio.wait_for(
             asyncio.to_thread(
                 lambda: client.models.generate_content(
