@@ -281,7 +281,7 @@ with col1:
         default_code = EXAMPLE_SNIPPETS[example_choice]
 
     code_input = st.text_area(
-        "",
+        "Code Input",
         value=default_code,
         height=300,
         placeholder="Paste your Python code here...",
