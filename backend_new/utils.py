@@ -1,5 +1,4 @@
 # utils.py
-import ast
 import timeit
 import tracemalloc
 import statistics
@@ -9,21 +8,38 @@ from config import BENCHMARK_RUNS, BENCHMARK_ITERATIONS
 
 
 def robust_benchmark(code: str, runs: int = None, iterations: int = None):
+    """
+    Benchmark code execution time and memory usage.
+    Uses a shared namespace dict so variables persist across lines within exec(),
+    fixing the Python 3 list-comprehension scope issue.
+    """
     if runs is None:
         runs = BENCHMARK_RUNS
     if iterations is None:
         iterations = BENCHMARK_ITERATIONS
-    
+
+    # Compile once for faster repeated execution
+    try:
+        compiled = compile(code, "<benchmark>", "exec")
+    except SyntaxError:
+        return None
+
     samples = []
     mem_samples = []
 
     for run_num in range(runs):
+        old_stdout = sys.stdout
         try:
-            old_stdout = sys.stdout
             sys.stdout = StringIO()
             tracemalloc.start()
 
-            t = timeit.timeit(lambda: exec(code), number=iterations)
+            # Use a shared namespace dict so variables defined on one line
+            # are visible to subsequent lines and inside comprehensions
+            def _run():
+                ns = {}
+                exec(compiled, ns)
+
+            t = timeit.timeit(_run, number=iterations)
 
             current, peak = tracemalloc.get_traced_memory()
             tracemalloc.stop()
@@ -31,9 +47,8 @@ def robust_benchmark(code: str, runs: int = None, iterations: int = None):
 
             samples.append(t * 1000 / iterations)
             mem_samples.append(peak / (1024 ** 2))
-        except Exception as e:
-            if sys.stdout != old_stdout:
-                sys.stdout = old_stdout
+        except Exception:
+            sys.stdout = old_stdout
             if tracemalloc.is_tracing():
                 tracemalloc.stop()
 

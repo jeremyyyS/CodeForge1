@@ -13,6 +13,7 @@ from llm_optimizer import optimize_with_gemini
 from utils import robust_benchmark
 from safety import SafetyGuard
 from metrics import calculate_confidence, generate_explainability
+from complexity import analyze_complexity
 
 app = FastAPI(title="CodeForge API", version="2.0")
 
@@ -55,6 +56,52 @@ def compute_speedup(original_bench, optimized_bench):
     return None
 
 
+def _build_response(mode, req_code, optimized, rules, transformations=None):
+    """Shared response builder for all optimization endpoints."""
+    original_bench = safe_benchmark(req_code)
+    optimized_bench = safe_benchmark(optimized)
+
+    speedup = compute_speedup(original_bench, optimized_bench)
+
+    variance_pct = original_bench.get("variance_pct", 0.0) if original_bench else 0.0
+    mem_before = original_bench.get("memory_mb", 0.0) if original_bench else 0.0
+    mem_after = optimized_bench.get("memory_mb", 0.0) if optimized_bench else 0.0
+
+    safety_analysis = safety_guard.validate(
+        req_code, optimized, speedup or 1.0, mem_before, mem_after
+    )
+    confidence = calculate_confidence(rules, speedup or 1.0, variance_pct)
+    explainability = generate_explainability(
+        req_code, optimized, speedup or 1.0, rules
+    )
+
+    # Complexity analysis for both original and optimized
+    orig_complexity = analyze_complexity(req_code)
+    opt_complexity = analyze_complexity(optimized)
+
+    return {
+        "mode": mode,
+        "status": "success",
+        "original_code": req_code,
+        "optimized_code": optimized,
+        "rules_detected": rules,
+        "transformations": transformations or [],
+        "benchmarks": {
+            "original": original_bench,
+            "optimized": optimized_bench,
+            "speedup_factor": round(speedup, 2) if speedup else None
+        },
+        "safety_analysis": safety_analysis,
+        "confidence": confidence,
+        "explainability": explainability,
+        "complexity": {
+            "original": orig_complexity,
+            "optimized": opt_complexity,
+        },
+        "timestamp": datetime.now().isoformat()
+    }
+
+
 # --------------------------------------------------------
 # OFFLINE (RULES ONLY FULL)
 # --------------------------------------------------------
@@ -69,60 +116,14 @@ async def optimize_rules_only(req: CodeRequest):
     except SyntaxError:
         optimized = req.code
 
-    original_bench = safe_benchmark(req.code)
-    optimized_bench = safe_benchmark(optimized)
-
-    speedup = compute_speedup(original_bench, optimized_bench)
-
-    variance_pct = original_bench.get("variance_pct", 0.0) if original_bench else 0.0
-    mem_before = original_bench.get("memory_mb", 0.0) if original_bench else 0.0
-    mem_after = optimized_bench.get("memory_mb", 0.0) if optimized_bench else 0.0
-
-    # Safety analysis
-    safety_analysis = safety_guard.validate(
-        req.code,
-        optimized,
-        speedup or 1.0,
-        mem_before,
-        mem_after
-    )
-
-    # Confidence scoring
-    confidence = calculate_confidence(rules, speedup or 1.0, variance_pct)
-
-    # Explainability
-    explainability = generate_explainability(
-        req.code,
-        optimized,
-        speedup or 1.0,
-        rules
-    )
+    result = _build_response("RULES_ONLY", req.code, optimized, rules, transformations)
 
     ai_explanation = await generate_ai_explanation(
-        req.code,
-        optimized,
-        rules,
-        speedup or 1.0
+        req.code, optimized, rules, result["benchmarks"].get("speedup_factor") or 1.0
     )
+    result["ai_explanation"] = ai_explanation
 
-    return {
-        "mode": "RULES_ONLY",
-        "status": "success",
-        "original_code": req.code,
-        "optimized_code": optimized,
-        "rules_detected": rules,
-        "transformations": transformations,
-        "benchmarks": {
-            "original": original_bench,
-            "optimized": optimized_bench,
-            "speedup_factor": round(speedup, 2) if speedup else None
-        },
-        "safety_analysis": safety_analysis,
-        "confidence": confidence,
-        "explainability": explainability,
-        "ai_explanation": ai_explanation,
-        "timestamp": datetime.now().isoformat()
-    }
+    return result
 
 
 # --------------------------------------------------------
@@ -180,60 +181,15 @@ async def optimize_hybrid(req: CodeRequest):
     except SyntaxError:
         optimized = req.code
 
-    # -------- BENCHMARK SAFELY --------
-    original_bench = safe_benchmark(req.code)
-    optimized_bench = safe_benchmark(optimized)
-
-    speedup = compute_speedup(original_bench, optimized_bench)
-
-    variance_pct = original_bench.get("variance_pct", 0.0) if original_bench else 0.0
-    mem_before = original_bench.get("memory_mb", 0.0) if original_bench else 0.0
-    mem_after = optimized_bench.get("memory_mb", 0.0) if optimized_bench else 0.0
-
-    # -------- SAFETY --------
-    safety_analysis = safety_guard.validate(
-        req.code,
-        optimized,
-        speedup or 1.0,
-        mem_before,
-        mem_after
-    )
-
-    # -------- CONFIDENCE --------
-    confidence = calculate_confidence(rules, speedup or 1.0, variance_pct)
-
-    explainability = generate_explainability(
-        req.code,
-        optimized,
-        speedup or 1.0,
-        rules
-    )
+    result = _build_response(mode, req.code, optimized, rules)
 
     # -------- AI EXPLANATION --------
     ai_explanation = await generate_ai_explanation(
-        req.code,
-        optimized,
-        rules,
-        speedup or 1.0
+        req.code, optimized, rules, result["benchmarks"].get("speedup_factor") or 1.0
     )
+    result["ai_explanation"] = ai_explanation
 
-    return {
-        "mode": mode,
-        "status": "success",
-        "original_code": req.code,
-        "optimized_code": optimized,
-        "rules_detected": rules,
-        "benchmarks": {
-            "original": original_bench,
-            "optimized": optimized_bench,
-            "speedup_factor": round(speedup, 2) if speedup else None
-        },
-        "safety_analysis": safety_analysis,
-        "confidence": confidence,
-        "explainability": explainability,
-        "ai_explanation": ai_explanation,
-        "timestamp": datetime.now().isoformat()
-    }
+    return result
 
 
 # --------------------------------------------------------

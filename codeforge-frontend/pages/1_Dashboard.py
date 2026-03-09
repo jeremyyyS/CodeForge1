@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import html as html_module
+import json
 
 from utils.auth import require_auth, get_current_user
 from utils import api
@@ -25,6 +26,65 @@ if "theme" not in st.session_state:
 
 if "result" not in st.session_state:
     st.session_state.result = None
+
+if "history" not in st.session_state:
+    st.session_state.history = []
+
+# -------------------- EXAMPLE SNIPPETS --------------------
+EXAMPLE_SNIPPETS = {
+    "Select an example...": "",
+    "List append in loop": """data = list(range(1000))
+result = []
+for x in data:
+    result.append(x * 2)
+print(len(result))""",
+    "range(len()) anti-pattern": """data = list(range(1000))
+result = []
+for i in range(len(data)):
+    result.append(data[i] * 2)
+print(len(result))""",
+    "Nested loops (quadratic)": """data = list(range(200))
+pairs = []
+for i in range(len(data)):
+    for j in range(len(data)):
+        if data[i] + data[j] == 100:
+            pairs.append((data[i], data[j]))
+print(len(pairs))""",
+    "String concatenation in loop": """items = list(range(500))
+result = ""
+for item in items:
+    result += str(item)
+print(len(result))""",
+    "Inefficient duplicate finder": """lst = list(range(500)) + list(range(250))
+duplicates = []
+for i in range(len(lst)):
+    count = 0
+    for j in range(len(lst)):
+        if lst[i] == lst[j]:
+            count += 1
+    if count > 1 and lst[i] not in duplicates:
+        duplicates.append(lst[i])
+print(len(duplicates))""",
+    "Sum of even numbers": """data_list = list(range(10000))
+total_even = 0
+for number in data_list:
+    if number % 2 == 0:
+        total_even += number
+print(total_even)""",
+    "Count primes (Sieve opportunity)": """def count_primes_below(limit):
+    count = 0
+    for number in range(2, limit):
+        is_prime = True
+        for divisor in range(2, number):
+            if number % divisor == 0:
+                is_prime = False
+                break
+        if is_prime:
+            count += 1
+    return count
+
+print(count_primes_below(500))""",
+}
 
 # -------------------- THEME TOGGLE --------------------
 def switch_theme():
@@ -138,6 +198,14 @@ html, body, [class*="css"] {{
     font-weight: 600;
 }}
 
+.complexity-card {{
+    background: {CARD};
+    border-radius: 12px;
+    padding: 16px;
+    border: 1px solid rgba(59,130,246,0.2);
+    margin-bottom: 8px;
+}}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -146,7 +214,28 @@ with st.sidebar:
     st.title("Navigation")
     st.write(f"Signed in as **{user['username']}**")
     st.write("---")
-    st.write("You can collapse this sidebar using the menu button.")
+
+    # Backend health check
+    health = api.api_client.health_check()
+    if health:
+        st.success(f"Backend: Online (v{health.get('version', '?')})")
+        if health.get("gemini_available"):
+            st.info("Gemini AI: Available")
+        else:
+            st.warning("Gemini AI: Not configured")
+    else:
+        st.error("Backend: Offline")
+
+    st.write("---")
+
+    # Optimization history
+    if st.session_state.history:
+        st.markdown("### Recent Optimizations")
+        for i, h in enumerate(reversed(st.session_state.history[-5:])):
+            speedup_txt = f"{h['speedup']}x" if h.get('speedup') else "N/A"
+            st.caption(f"{i+1}. {h['mode']} | Speedup: {speedup_txt}")
+    else:
+        st.caption("No optimization history yet.")
 
 # -------------------- HEADER --------------------
 header_left, header_right = st.columns([8,2])
@@ -172,6 +261,10 @@ opt_mode = st.radio(
     help="AI-Powered uses Gemini API with automatic fallback. Rules-Only works fully offline."
 )
 st.markdown("")
+
+# Example snippet selector
+example_choice = st.selectbox("Load an example snippet:", list(EXAMPLE_SNIPPETS.keys()))
+
 uploaded_file = st.file_uploader("Or upload a .py file", type=["py"])
 
 # -------------------- LAYOUT --------------------
@@ -180,11 +273,13 @@ col1, col2 = st.columns(2)
 with col1:
     st.markdown("### Input Code")
 
-    # Pre-fill from uploaded file
+    # Pre-fill from uploaded file or example
     default_code = ""
     if uploaded_file is not None:
         default_code = uploaded_file.read().decode("utf-8")
         uploaded_file.seek(0)
+    elif example_choice and example_choice != "Select an example...":
+        default_code = EXAMPLE_SNIPPETS[example_choice]
 
     code_input = st.text_area(
         "",
@@ -213,10 +308,29 @@ if run and code_input.strip():
             result = api.api_client.optimize_rules_only(code_input)
         st.session_state.result = result
 
+        # Track history
+        if result and not result.get("error"):
+            benchmarks = result.get("benchmarks", {})
+            st.session_state.history.append({
+                "mode": result.get("mode", "?"),
+                "speedup": benchmarks.get("speedup_factor"),
+                "rules": len(result.get("rules_detected", [])),
+                "timestamp": result.get("timestamp", ""),
+            })
+
 elif bench and code_input.strip():
     with st.spinner("Benchmarking (Rules-Only)..."):
         result = api.api_client.optimize_rules_only(code_input)
         st.session_state.result = result
+
+        if result and not result.get("error"):
+            benchmarks = result.get("benchmarks", {})
+            st.session_state.history.append({
+                "mode": "BENCHMARK",
+                "speedup": benchmarks.get("speedup_factor"),
+                "rules": len(result.get("rules_detected", [])),
+                "timestamp": result.get("timestamp", ""),
+            })
 
 result = st.session_state.result
 
@@ -239,8 +353,8 @@ if result and result.get("optimized_code"):
     )
 
     # -------------------- TABS --------------------
-    tab_code, tab_perf, tab_rules, tab_safety, tab_ai = st.tabs([
-        "Code Diff", "Performance", "Rules Detected", "Safety & Confidence", "AI Explanation"
+    tab_code, tab_perf, tab_complexity, tab_rules, tab_safety, tab_ai = st.tabs([
+        "Code Diff", "Performance", "Complexity", "Rules Detected", "Safety & Confidence", "AI Explanation"
     ])
 
     # ---- TAB: Code Diff ----
@@ -278,31 +392,68 @@ if result and result.get("optimized_code"):
 
             st.markdown("### Performance Metrics")
 
-            m1, m2, m3 = st.columns(3)
+            m1, m2, m3, m4 = st.columns(4)
 
             with m1:
-                runtime_saved = f"{round(orig_ms - opt_ms, 2)} ms" if orig_ms and opt_ms else "---"
-                st.markdown(f"<div class='metric-card'><div>Runtime Saved</div><div class='metric-value'>{runtime_saved}</div></div>", unsafe_allow_html=True)
+                orig_runtime_text = f"{orig_ms:.3f} ms" if orig_ms is not None else "N/A"
+                st.markdown(f"<div class='metric-card'><div>Original Runtime</div><div class='metric-value'>{orig_runtime_text}</div></div>", unsafe_allow_html=True)
 
             with m2:
-                memory_saved = f"{round(orig_mem - opt_mem, 2)} MB" if orig_mem and opt_mem else "---"
-                st.markdown(f"<div class='metric-card'><div>Memory Reduced</div><div class='metric-value'>{memory_saved}</div></div>", unsafe_allow_html=True)
+                opt_runtime_text = f"{opt_ms:.3f} ms" if opt_ms is not None else "N/A"
+                st.markdown(f"<div class='metric-card'><div>Optimized Runtime</div><div class='metric-value'>{opt_runtime_text}</div></div>", unsafe_allow_html=True)
 
             with m3:
-                speedup_text = f"{round(speed, 2)}x" if speed else "---"
-                st.markdown(f"<div class='metric-card'><div>Speedup Factor</div><div class='metric-value'>{speedup_text}</div></div>", unsafe_allow_html=True)
+                if orig_ms is not None and opt_ms is not None:
+                    runtime_saved = f"{round(orig_ms - opt_ms, 3)} ms"
+                else:
+                    runtime_saved = "N/A"
+                st.markdown(f"<div class='metric-card'><div>Runtime Saved</div><div class='metric-value'>{runtime_saved}</div></div>", unsafe_allow_html=True)
+
+            with m4:
+                speedup_text = f"{speed}x" if speed is not None else "N/A"
+                color = ACCENT
+                if speed is not None:
+                    if speed >= 1.5:
+                        color = "#22C55E"  # green
+                    elif speed < 1.0:
+                        color = "#EF4444"  # red - slower
+                st.markdown(f"<div class='metric-card'><div>Speedup Factor</div><div class='metric-value' style='color:{color}'>{speedup_text}</div></div>", unsafe_allow_html=True)
+
+            # Memory metrics
+            mem1, mem2 = st.columns(2)
+            with mem1:
+                orig_mem_text = f"{orig_mem:.2f} MB" if orig_mem is not None else "N/A"
+                st.markdown(f"<div class='metric-card'><div>Original Memory</div><div class='metric-value'>{orig_mem_text}</div></div>", unsafe_allow_html=True)
+            with mem2:
+                opt_mem_text = f"{opt_mem:.2f} MB" if opt_mem is not None else "N/A"
+                st.markdown(f"<div class='metric-card'><div>Optimized Memory</div><div class='metric-value'>{opt_mem_text}</div></div>", unsafe_allow_html=True)
+
+            # Variance info
+            orig_var = orig.get("variance_pct", 0)
+            opt_var = opt.get("variance_pct", 0)
+            if orig_var or opt_var:
+                st.caption(f"Benchmark variance: Original {orig_var}% | Optimized {opt_var}%")
 
             # Gauge
-            if speed:
+            if speed is not None:
                 fig_gauge = go.Figure(go.Indicator(
                     mode="gauge+number",
                     value=speed,
                     title={'text': "Speedup Factor"},
-                    gauge={'axis': {'range': [0, max(5, speed+1)]}}
+                    gauge={
+                        'axis': {'range': [0, max(5, speed + 1)]},
+                        'bar': {'color': "#00F5FF"},
+                        'steps': [
+                            {'range': [0, 1], 'color': "rgba(239,68,68,0.2)"},
+                            {'range': [1, 2], 'color': "rgba(59,130,246,0.2)"},
+                            {'range': [2, max(5, speed + 1)], 'color': "rgba(34,197,94,0.2)"},
+                        ],
+                    }
                 ))
 
                 fig_gauge.update_layout(
-                    paper_bgcolor=BG,
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
                     font_color=GRAPH_FONT,
                     height=350
                 )
@@ -314,33 +465,99 @@ if result and result.get("optimized_code"):
 
             c1, c2 = st.columns(2)
 
-            if orig_ms and opt_ms:
+            if orig_ms is not None and opt_ms is not None:
                 df_runtime = pd.DataFrame({
                     "Version": ["Before", "After"],
                     "Runtime (ms)": [orig_ms, opt_ms]
                 })
-                fig_runtime = px.bar(df_runtime, x="Version", y="Runtime (ms)")
+                fig_runtime = px.bar(
+                    df_runtime, x="Version", y="Runtime (ms)",
+                    color="Version",
+                    color_discrete_map={"Before": "#EF4444", "After": "#22C55E"}
+                )
                 fig_runtime.update_layout(
-                    plot_bgcolor=BG,
-                    paper_bgcolor=BG,
-                    font_color=GRAPH_FONT
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    font_color=GRAPH_FONT,
+                    showlegend=False
                 )
                 c1.plotly_chart(fig_runtime, use_container_width=True)
 
-            if orig_mem and opt_mem:
+            if orig_mem is not None and opt_mem is not None:
                 df_mem = pd.DataFrame({
                     "Version": ["Before", "After"],
                     "Memory (MB)": [orig_mem, opt_mem]
                 })
-                fig_mem = px.bar(df_mem, x="Version", y="Memory (MB)")
+                fig_mem = px.bar(
+                    df_mem, x="Version", y="Memory (MB)",
+                    color="Version",
+                    color_discrete_map={"Before": "#EF4444", "After": "#22C55E"}
+                )
                 fig_mem.update_layout(
-                    plot_bgcolor=BG,
-                    paper_bgcolor=BG,
-                    font_color=GRAPH_FONT
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    font_color=GRAPH_FONT,
+                    showlegend=False
                 )
                 c2.plotly_chart(fig_mem, use_container_width=True)
         else:
             st.info("No benchmark data available for this optimization.")
+
+    # ---- TAB: Complexity ----
+    with tab_complexity:
+        complexity_data = result.get("complexity")
+        if complexity_data:
+            orig_cx = complexity_data.get("original", {})
+            opt_cx = complexity_data.get("optimized", {})
+
+            st.markdown("### Code Complexity Analysis")
+
+            cx1, cx2 = st.columns(2)
+
+            with cx1:
+                st.markdown("**Original Code**")
+                st.markdown(f"""<div class='complexity-card'>
+                    <b>Cyclomatic Complexity:</b> {orig_cx.get('cyclomatic_complexity', '?')}<br>
+                    <b>Max Nesting Depth:</b> {orig_cx.get('max_nesting_depth', '?')}<br>
+                    <b>Loops:</b> {orig_cx.get('num_loops', '?')} | <b>Branches:</b> {orig_cx.get('num_branches', '?')}<br>
+                    <b>Functions:</b> {orig_cx.get('num_functions', '?')}<br>
+                    <b>Lines of Code:</b> {orig_cx.get('lines_of_code', '?')}<br>
+                    <b>Big-O Estimate:</b> {html_module.escape(str(orig_cx.get('big_o_estimate', '?')))}
+                </div>""", unsafe_allow_html=True)
+
+            with cx2:
+                st.markdown("**Optimized Code**")
+                st.markdown(f"""<div class='complexity-card'>
+                    <b>Cyclomatic Complexity:</b> {opt_cx.get('cyclomatic_complexity', '?')}<br>
+                    <b>Max Nesting Depth:</b> {opt_cx.get('max_nesting_depth', '?')}<br>
+                    <b>Loops:</b> {opt_cx.get('num_loops', '?')} | <b>Branches:</b> {opt_cx.get('num_branches', '?')}<br>
+                    <b>Functions:</b> {opt_cx.get('num_functions', '?')}<br>
+                    <b>Lines of Code:</b> {opt_cx.get('lines_of_code', '?')}<br>
+                    <b>Big-O Estimate:</b> {html_module.escape(str(opt_cx.get('big_o_estimate', '?')))}
+                </div>""", unsafe_allow_html=True)
+
+            # Complexity comparison chart
+            if orig_cx and opt_cx:
+                metrics_list = ["cyclomatic_complexity", "max_nesting_depth", "num_loops", "lines_of_code"]
+                labels = ["Cyclomatic", "Max Depth", "Loops", "LOC"]
+                orig_vals = [orig_cx.get(m, 0) for m in metrics_list]
+                opt_vals = [opt_cx.get(m, 0) for m in metrics_list]
+
+                fig_cx = go.Figure(data=[
+                    go.Bar(name='Original', x=labels, y=orig_vals, marker_color='#EF4444'),
+                    go.Bar(name='Optimized', x=labels, y=opt_vals, marker_color='#22C55E')
+                ])
+                fig_cx.update_layout(
+                    barmode='group',
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    font_color=GRAPH_FONT,
+                    height=350,
+                    title="Complexity Comparison"
+                )
+                st.plotly_chart(fig_cx, use_container_width=True)
+        else:
+            st.info("Complexity analysis not available.")
 
     # ---- TAB: Rules Detected ----
     with tab_rules:
@@ -359,6 +576,14 @@ if result and result.get("optimized_code"):
                     <em>Suggestion: {suggestion}</em>
                 </div>
                 """, unsafe_allow_html=True)
+
+            # Show transformations applied
+            transformations = result.get("transformations", [])
+            if transformations:
+                st.markdown("---")
+                st.markdown(f"**{len(transformations)} transformation(s) applied:**")
+                for t in transformations:
+                    st.success(f"Applied: {t.get('rule', '?')} - {t.get('suggestion', '')}")
         else:
             st.info("No rule-based patterns detected in this code.")
 
