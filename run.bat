@@ -5,14 +5,12 @@ REM Usage: Double-click this file or run: run.bat
 REM ============================================================
 
 title CodeForge
+cd /d "%~dp0"
 
 echo.
-echo   ____          _      _____
-echo  / ___^|___   __^| ^| ___^|  ___^|__  _ __ __ _  ___
-echo ^| ^|   / _ \ / _` ^|/ _ \ ^|_ / _ \^| '__/ _` ^|/ _ \
-echo ^| ^|__^| (_) ^| (_^| ^|  __/  _^| (_) ^| ^| ^| (_^| ^|  __/
-echo  \____\___/ \__,_^|\___|_^|  \___/^|_^|  \__, ^|\___|
-echo                                       ^|___/
+echo  ================================================
+echo     CodeForge - Python Code Optimizer
+echo  ================================================
 echo.
 
 REM ---- Check Python ----
@@ -23,50 +21,53 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
+echo [1/4] Python found.
 
-echo [1/4] Checking dependencies...
-pip install -q -r codeforge-frontend\requirements.txt >nul 2>&1
+REM ---- Install Dependencies ----
+echo [2/4] Installing dependencies...
+pip install -r codeforge-frontend\requirements.txt
 if errorlevel 1 (
-    echo [ERROR] Failed to install dependencies.
-    echo Run manually: pip install -r codeforge-frontend\requirements.txt
-    pause
-    exit /b 1
+    echo [WARNING] Some dependencies may have failed. Trying to continue...
 )
-echo       Dependencies OK.
+echo       Dependencies ready.
 
 REM ---- Setup .env if missing ----
 if not exist backend_new\.env (
-    echo [2/4] Creating .env from template...
-    copy backend_new\.env.example backend_new\.env >nul
-    echo       .env created. Edit backend_new\.env to add your GEMINI_API_KEY.
-) else (
-    echo [2/4] .env already exists.
+    echo [INFO] Creating .env from template...
+    copy backend_new\.env.example backend_new\.env >nul 2>nul
+    echo       Edit backend_new\.env to add your GEMINI_API_KEY for AI mode.
 )
 
 REM ---- Start Backend ----
-echo [3/4] Starting backend...
-start /b "CodeForge Backend" python backend_new\jeremy_final.py
+echo [3/4] Starting backend server...
+pushd backend_new
+start "CodeForge-Backend" /min python jeremy_final.py
+popd
 
-REM Wait for backend
-echo       Waiting for backend...
+REM Wait for backend to be ready
+echo       Waiting for backend to start...
 timeout /t 5 /nobreak >nul
+echo       Backend running on http://localhost:8000
 
 REM ---- Start Frontend ----
 echo [4/4] Starting frontend...
 echo.
-echo =================================================
-echo   CodeForge is ready!
-echo   Frontend: http://localhost:8501
-echo   Backend:  http://localhost:8000
-echo   Login:    admin / admin123
-echo =================================================
+echo  ================================================
+echo    CodeForge is ready!
+echo    Open:  http://localhost:8501
+echo    Login: admin / admin123
+echo  ================================================
 echo.
-echo Close this window to stop CodeForge.
+echo  Press Ctrl+C or close this window to stop.
 echo.
 
-streamlit run codeforge-frontend\Login.py --server.port 8501 --server.headless true
+pushd codeforge-frontend
+streamlit run Login.py --server.port 8501 --server.headless true
+popd
 
-REM ---- Cleanup on close ----
-taskkill /f /fi "WINDOWTITLE eq CodeForge Backend" >nul 2>&1
+REM ---- Cleanup when frontend stops ----
+echo.
+echo Stopping backend...
+taskkill /f /fi "WINDOWTITLE eq CodeForge-Backend" >nul 2>&1
 echo CodeForge stopped.
 pause
