@@ -296,7 +296,8 @@ async def root():
     return {
         "message": "CodeForge Code Optimizer",
         "status": "running",
-        "version": "2.1"
+        "version": "2.1",
+        "gemini_available": bool(GEMINI_API_KEY),
     }
 
 

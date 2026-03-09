@@ -344,13 +344,8 @@ if result and result.get("optimized_code"):
     output_placeholder.code(optimized_code, language="python")
 
     if result.get("ai_explanation"):
-        explanation = html_module.escape(str(result["ai_explanation"]))
-        st.markdown(f"""
-        <div class="ai-panel">
-            <h3>AI Analysis</h3>
-            <p>{explanation}</p>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown("### AI Analysis")
+        st.markdown(result["ai_explanation"])
 
     # -------------------- TABS --------------------
     tab_code, tab_perf, tab_complexity, tab_rules, tab_safety, tab_ai = st.tabs([
@@ -633,16 +628,10 @@ if result and result.get("optimized_code"):
     with tab_ai:
         ai_explanation = result.get("ai_explanation")
         if ai_explanation:
-            # Escape HTML to prevent XSS from AI-generated content
-            safe_explanation = html_module.escape(ai_explanation)
-            st.markdown(f"""
-            <div class="ai-panel">
-                <h3>AI Analysis</h3>
-                <p>{safe_explanation}</p>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown("#### AI Analysis")
+            st.markdown(ai_explanation)
         else:
-            st.info("AI explanation not available. The Gemini API may be unavailable.")
+            st.info("AI explanation not available. Configure Gemini API key for detailed analysis.")
 
     # ---- Mode indicator ----
     mode = result.get("mode", "UNKNOWN")

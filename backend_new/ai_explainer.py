@@ -112,28 +112,36 @@ Avoid fluff. Be confident and analytical.
 
 def _generate_fallback(rules: list, speedup: float) -> str:
     """Generate a rule-based fallback explanation when API is unavailable."""
-    fallback = []
+    parts = []
 
     if rules:
-        rule_messages = [r.get("suggestion", "") for r in rules[:3] if r.get("suggestion")]
-        if rule_messages:
-            fallback.append(
-                "The optimization addresses the following patterns: "
-                + "; ".join(rule_messages) + "."
+        suggestions = [r.get("suggestion", "") for r in rules[:3] if r.get("suggestion")]
+        detections = [r.get("message", "") for r in rules[:3] if r.get("message")]
+
+        if suggestions:
+            parts.append(
+                "**Optimizations applied:** " + "; ".join(suggestions) + "."
             )
-        else:
-            fallback.append(
-                "The optimization restructures inefficient patterns detected in the original code."
+        if detections:
+            parts.append(
+                "**Detected patterns:** " + "; ".join(detections) + "."
             )
 
-    if speedup and speedup > 1:
-        fallback.append(
-            f"This results in approximately {round(speedup, 2)}x faster execution."
+    if not parts:
+        parts.append(
+            "The optimization restructures inefficient patterns detected in the original code."
         )
 
-    fallback.append(
-        "The improvement likely comes from reducing Python loop overhead "
-        "and leveraging more efficient built-in operations implemented in optimized C code."
+    if speedup and speedup > 1:
+        pct = round((speedup - 1) * 100, 1)
+        parts.append(
+            f"**Performance gain:** ~{round(speedup, 2)}x faster ({pct}% improvement)."
+        )
+
+    parts.append(
+        "**How it works:** The improvement comes from reducing Python-level loop overhead, "
+        "minimizing redundant computations, and leveraging efficient built-in operations "
+        "implemented in optimized C code."
     )
 
-    return " ".join(fallback)
+    return " ".join(parts)
